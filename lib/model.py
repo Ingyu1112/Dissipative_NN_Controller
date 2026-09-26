@@ -8,44 +8,93 @@ import torch.nn.functional as F
 HID_SIZE = 128
 
 class DDPGActor(nn.Module): 
-    def __init__(self, obs_size: int, act_size: int, bias: bool = False): 
+    def __init__(self, obs_size: int, act_size: int, hidden: list, bias: bool = False): 
         super(DDPGActor, self).__init__() 
  
         if not bias:
             self.net = nn.Sequential( 
-                nn.Linear(obs_size, 400, bias=False), 
+                nn.Linear(obs_size, hidden[0], bias=False), 
                 nn.ReLU(), 
-                nn.Linear(400, 300, bias=False), 
+                nn.Linear(hidden[0], hidden[1], bias=False), 
                 nn.ReLU(), 
-                nn.Linear(300, act_size, bias=False), 
-                nn.Tanh()   # to squeeze the values to -1 ... 1 range
+                nn.Linear(hidden[1], act_size, bias=False) # to squeeze the values to -1 ... 1 range,
             )
         else:
             self.net = nn.Sequential( 
-                nn.Linear(obs_size, 400), 
+                nn.Linear(obs_size, hidden[0]), 
                 nn.ReLU(), 
-                nn.Linear(400, 300), 
+                nn.Linear(hidden[0], hidden[1]), 
                 nn.ReLU(), 
-                nn.Linear(300, act_size), 
+                nn.Linear(hidden[1], act_size), 
                 nn.Tanh()   # to squeeze the values to -1 ... 1 range
             )
 
     def forward(self, x: torch.Tensor):
-        return self.net(x)
+        out = self.net(x)
+        action = torch.tanh(out/3)*3
+        return action
+
+class DDPGActorResidual(nn.Module): 
+    def __init__(self, obs_size: int, act_size: int, hidden: list, bias: bool = False): 
+        super(DDPGActorResidual, self).__init__() 
+ 
+        if not bias:
+            self.net = nn.Sequential( 
+                nn.Linear(obs_size, hidden[0], bias=False), 
+                nn.ReLU(), 
+                nn.Linear(hidden[0], hidden[1], bias=False), 
+                nn.ReLU(), 
+                nn.Linear(hidden[1], act_size, bias=False) # to squeeze the values to -1 ... 1 range,
+            )
+        else:
+            self.net = nn.Sequential( 
+                nn.Linear(obs_size, hidden[0]), 
+                nn.ReLU(), 
+                nn.Linear(hidden[0], hidden[1]), 
+                nn.ReLU(), 
+                nn.Linear(hidden[1], act_size), 
+                nn.Tanh()   # to squeeze the values to -1 ... 1 range
+            )
+
+        self.residual = nn.Linear(obs_size, act_size, bias=False)
+
+    def forward(self, x: torch.Tensor):
+        out = self.net(x)
+        out_residual = self.residual(x)
+        return out + out_residual
+
+        
+class DDPGActorLinear(nn.Module): 
+    def __init__(self, obs_size: int, act_size: int, bias: bool = False): 
+        super(DDPGActorLinear, self).__init__() 
+ 
+        if not bias:
+            self.net = nn.Sequential( 
+                nn.Linear(obs_size, act_size, bias=False)
+            )
+        else:
+            self.net = nn.Sequential( 
+                nn.Linear(obs_size, act_size)
+            )
+
+    def forward(self, x: torch.Tensor):
+        out = self.net(x)
+        return out
+
 
 class DDPGCritic(nn.Module):    # real implementation of Q-value Q(s,a)
-    def __init__(self, obs_size: int, act_size: int): 
+    def __init__(self, obs_size: int, act_size: int, hidden: list): 
         super(DDPGCritic, self).__init__() 
  
         self.obs_net = nn.Sequential( 
-            nn.Linear(obs_size, 400), 
+            nn.Linear(obs_size, hidden[0]), 
             nn.ReLU(), 
         )
 
         self.out_net = nn.Sequential(
-            nn.Linear(400 + act_size, 300), # include action input
+            nn.Linear(hidden[0] + act_size, hidden[1]), # include action input
             nn.ReLU(),
-            nn.Linear(300, 1)
+            nn.Linear(hidden[1], 1)
         )
 
     def forward(self, x: torch.Tensor, a: torch.Tensor): 
@@ -54,11 +103,12 @@ class DDPGCritic(nn.Module):    # real implementation of Q-value Q(s,a)
         
 class AgentDDPG(ptan.agent.BaseAgent):
     """
-    Agent implementing Orstein0Uhlenbeck exploration process
+    Agent implementing Orstein-Uhlenbeck exploration process
     """
     def __init__(self, net: DDPGActor, device: torch.device = torch.device('cpu'),
                  ou_enabled: bool = True, ou_mu: float = 0.0, ou_teta: float = 0.15,
-                 ou_sigma: float = 0.2, ou_epsilon: float = 1.0):
+                 ou_sigma: float = 0.2, ou_epsilon: float = 1.0,
+                 act_clip: bool = True, max_input: float = 1.0):
         self.net = net
         self.device = device
         self.ou_enabled = ou_enabled
@@ -66,6 +116,8 @@ class AgentDDPG(ptan.agent.BaseAgent):
         self.ou_teta = ou_teta
         self.ou_sigma = ou_sigma
         self.ou_epsilon = ou_epsilon
+        self.act_clip = act_clip
+        self.max_input = max_input
 
     def initial_state(self):
         return None
@@ -94,6 +146,24 @@ class AgentDDPG(ptan.agent.BaseAgent):
         else:
             new_a_states = agent_states
             
-        actions = np.clip(actions, -1, 1)
+        actions = np.clip(actions, -self.max_input, self.max_input) if self.act_clip else actions
         return actions, new_a_states
 
+class MultiAgentWrapper(ptan.agent.BaseAgent):
+    def __init__(self, act_nets: list, device: torch.device = torch.device('cpu')):
+        self.agents = [AgentDDPG(net, device) for net in act_nets]
+        self.num_agents = len(act_nets)
+
+    def __call__(self, states, agent_states=None):
+        states_np = np.array(states)
+        agent_actions = []
+
+        for i, agent in enumerate(self.agents):
+            local_states = states_np[:, i*self.num_agents : (i+1)*self.num_agents]
+
+            actions, _ = agent(local_states, agent_states)
+            agent_actions.append(actions)
+
+        joint_actions = np.concatenate(agent_actions, axis=1)
+
+        return joint_actions, agent_states
