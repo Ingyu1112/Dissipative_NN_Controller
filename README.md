@@ -1,6 +1,6 @@
 # Dissipative Neural Network Controller
 
-This repository contains code for training neural-network controllers for custom Gymnasium/MuJoCo environments and refining the trained policies using dissipativity-based optimization.
+This repository contains code for training neural-network controllers for custom Gymnasium/MuJoCo inverted pendulum environments and refining the trained policies using dissipativity-based optimization.
 
 ## Overview
 
