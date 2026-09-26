@@ -63,6 +63,11 @@ python -m pip install -r requirements_refinement.txt
 
 The two environments should be kept separate because the refinement environment and the training/video environment may have incompatible package combinations, especially around CVXPY/MOSEK, NumPy, Gymnasium, and video recording.
 
+MOSEK requires a valid license. You can obtain a MOSEK license from the
+[MOSEK website](https://www.mosek.com/). After obtaining the license, set the
+`MOSEKLM_LICENSE_FILE` environment variable to the path of the license file
+before running the refinement code.
+
 ## RL training
 
 Run training from the repository root so that the relative paths to `lib/`, `custom_xml/`, and `saves/` are resolved correctly.
