@@ -24,7 +24,7 @@ import copy
 L2_DIST = 'sinc'     # [sinc, exp, inv_prop]
 DT = 0.001
 CUTOFF = 4
-VIDEO_SAVE = False
+VIDEO_SAVE = True
 
 np.set_printoptions(precision=4, suppress=True, linewidth=200)
 
@@ -174,9 +174,9 @@ class ControllerSynthesis():
         self.actor_stable.requires_grad_(False)
 
         if self.struct == 'linear':
-
-            cost = cp.norm(self.W_linear_train[:,:2]-K,"fro") \
-                 + cp.norm(self.W_linear_train[:,2:]-D,"fro")
+                 
+            cost = cp.norm(K,"fro") \
+                 + cp.norm(D,"fro")
             constraints = pre_constraint["plant"]
 
             prob = cp.Problem(cp.Minimize(cost),
@@ -599,6 +599,7 @@ if __name__ == "__main__":
     for i in range(num_seeds):
         print(f"{i}-th linear stable controller")
         linear_controller[i].policy_refinement(m1, m2, e, K, D, q_plant, s_plant, r_plant, pre_constraint = pre_constraint)
+
         x_linear_stable_roll[i], a_linear_stable_roll[i], total_reward_linear_stable[i], steps[i], _ = \
             linear_controller[i].roll_out(
                 dt = DT, l2_dist = L2_DIST, linear_mag = 10, rotational_mag = 6
@@ -607,6 +608,7 @@ if __name__ == "__main__":
         if VIDEO_SAVE:
             save_mujoco_video(x_linear_stable_roll[i], f"video/{L2_DIST}_linear_stable_control_"+str(i)+".mp4", fps=int(round(1 / DT)))
             print(f"  Finished saving {i}-th video")
+
             
     for i in range(num_seeds):
         print(f"{i}-th resnet stable controller")
